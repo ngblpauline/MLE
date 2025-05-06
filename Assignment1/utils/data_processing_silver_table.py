@@ -17,6 +17,7 @@ from functools import reduce
 from operator import add
 from pyspark.sql.functions import when
 from pyspark.sql.functions import regexp_replace, when, abs, regexp_extract
+from pyspark.sql.types import DoubleType
 
 def process_silver_table_financials(snapshot_date_str, bronze_financials_directory, silver_financials_directory, spark):
     # prepare arguments
@@ -241,7 +242,7 @@ def process_silver_table_attributes(snapshot_date_str, bronze_attributes_directo
         "Customer_ID": StringType(),
         "Age": IntegerType(),
         "SSN": StringType(),
-        "Occupation": StringType()
+        "Occupation": StringType(),
         "snapshot_date": DateType(),
     }
 
@@ -259,9 +260,8 @@ def process_silver_table_attributes(snapshot_date_str, bronze_attributes_directo
         when((col("Age_clean") < 0) | (col("Age_clean") > 120), 1).otherwise(0))
     
     # finalize age: null invalid entries
-    df = df.withColumn(
-        "Age_final",
-        when(col("age_invalid_flag") == 1, None).otherwise(col("Age_clean"))).cast(IntegerType())
+    df = df.withColumn("Age_final",when(col("age_invalid_flag") == 1, None).otherwise(col("Age_clean")).cast(IntegerType())
+                      )
     
     # drop intermediates
     df = df.drop("Age").drop("Age_clean")
@@ -307,7 +307,7 @@ def process_silver_table_clickstream(snapshot_date_str, bronze_clickstream_direc
     
     # connect to bronze table
     partition_name = "bronze_feature_clickstream_" + snapshot_date_str.replace('-','_') + '.csv'
-    filepath = bronze_clickstraem_directory + partition_name
+    filepath = bronze_clickstream_directory + partition_name
     df = spark.read.csv(filepath, header=True, inferSchema=True)
     print('loaded from:', filepath, 'row count:', df.count())
 
@@ -345,14 +345,6 @@ def process_silver_table_clickstream(snapshot_date_str, bronze_clickstream_direc
     numeric_cols = [col(f"fe_{i}") for i in range(1, 21)]
     df = df.withColumn("click_sum", reduce(add, numeric_cols).cast(DoubleType()))
     df = df.withColumn("click_avg",(col("click_sum") / len(numeric_cols)).cast(DoubleType()))
-
-    # sanity checks: duplicates and nulls
-    total_rows = df.count()
-    distinct_rows = df.dropDuplicates(["Customer_ID", "snapshot_date"]).count()
-    if distinct_rows < total_rows:
-        print(f"{total_rows - distinct_rows} duplicate rows detected")
-    null_counts = {c: df.filter(col(c).isNull()).count() for c in df.columns}
-    print("Null counts per column:", null_counts)
 
     # augment data: active feature count (# of non-zero features)
     numeric_names = [f"fe_{i}" for i in range(1, 21)]
