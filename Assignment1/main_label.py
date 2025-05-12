@@ -31,7 +31,7 @@ spark.sparkContext.setLogLevel("ERROR")
 snapshot_date_str = "2023-01-01"
 
 start_date_str = "2023-01-01"
-end_date_str = "2024-12-01"
+end_date_str = "2025-11-01"
 
 # generate list of dates to process
 def generate_first_of_month_dates(start_date_str, end_date_str):
