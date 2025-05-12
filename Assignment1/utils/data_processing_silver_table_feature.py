@@ -152,6 +152,48 @@ def process_silver_table_financials(snapshot_date_str, bronze_financials_directo
         )
     )
 
+    # 8) Loan type counts (exactly like pandas’ one‐hot counts)
+    from pyspark.sql.functions import regexp_replace, split, size, expr, sum as spark_sum, lit
+
+    loan_types = [
+        'Auto Loan',
+        'Credit-Builder Loan',
+        'Debt Consolidation Loan',
+        'Home Equity Loan',
+        'Mortgage Loan',
+        'Not Specified',
+        'Payday Loan',
+        'Personal Loan',
+        'Student Loan'
+    ]
+
+    # normalize “ and ” → comma, then split into array
+    df = df.withColumn(
+        "_loan_array",
+        split(
+            regexp_replace(col("Type_of_Loan"), r"\s+and\s+", ","), 
+            r",\s*"
+        )
+    )
+
+    # for each loan type, count its occurrences
+    for lt in loan_types:
+        out_col = lt.replace('-', '_').replace(' ', '_') + "_count"
+        df = df.withColumn(
+            out_col,
+            size(expr(f"filter(_loan_array, x -> x = '{lt}')"))
+        )
+
+    # if none matched, Unknown_count = 1
+    known_cols = [lt.replace('-', '_').replace(' ', '_') + "_count" for lt in loan_types]
+    df = df.withColumn(
+        "_known_sum",
+        sum(col(c) for c in known_cols)
+    ).withColumn(
+        "Unknown_count",
+        when(col("_known_sum") == 0, lit(1)).otherwise(lit(0))
+    ).drop("_loan_array", "_known_sum")
+
     # save silver table - IRL connect to database to write
     partition_name = "silver_feature_financials_" + snapshot_date_str.replace('-','_') + '.parquet' 
     filepath = silver_financials_directory + partition_name
