@@ -76,6 +76,7 @@ def process_silver_table_financials(snapshot_date_str, bronze_financials_directo
         "Total_EMI_per_month",
         "Amount_invested_monthly",
         "Monthly_Balance",
+        "Credit_Utilization_Ratio",
     ]:
         df = df.withColumn(
             c,
