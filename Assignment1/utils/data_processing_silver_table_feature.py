@@ -32,100 +32,66 @@ def process_silver_table_financials(snapshot_date_str, bronze_financials_directo
     # clean data: enforce schema / data type
     # Dictionary specifying columns and their desired datatypes
     column_type_map = {
-        "Customer_ID":             StringType(),
-        "Annual_Income":           FloatType(),
-        "Monthly_Inhand_Salary":   FloatType(),
-        "Num_Bank_Accounts":       FloatType(),
-        "Num_Credit_Card":         FloatType(),
-        "Interest_Rate":           FloatType(),
-        "Num_of_Loan":             FloatType(),
-        "Type_of_Loan":            StringType(),
-        "Delay_from_due_date":     FloatType(),
-        "Num_of_Delayed_Payment":  FloatType(),
-        "Changed_Credit_Limit":    FloatType(),
-        "Num_Credit_Inquiries":    FloatType(),
-        "Credit_Mix":              StringType(),
-        "Outstanding_Debt":        FloatType(),
-        "Credit_Utilization_Ratio":FloatType(),
-        "Credit_History_Age":      FloatType(),
-        "Payment_of_Min_Amount":   StringType(),
-        "Total_EMI_per_month":     FloatType(),
-        "Amount_invested_monthly": FloatType(),
-        "Payment_Behaviour":       StringType(),
-        "Monthly_Balance":         FloatType(),
-        "snapshot_date":           DateType(),
+        "Customer_ID":           StringType(),
+        "Num_Bank_Accounts":     IntegerType(),
+        "Num_Credit_Card":       IntegerType(),
+        "Interest_Rate":         IntegerType(),
+        "Delay_from_due_date":   IntegerType(),
+        "Num_Credit_Inquiries":  IntegerType(),
+        "Payment_of_Min_Amount": StringType(),
+        "Payment_Behaviour":     StringType(),
+        "Type_of_Loan":          StringType(),
+        "Credit_Mix":            StringType(),
+        "snapshot_date":         DateType(),
     }
 
     for column, new_type in column_type_map.items():
         df = df.withColumn(column, col(column).cast(new_type))
 
-    # 1) Clean Annual_Income, Monthly_Inhand_Salary,
-    #    Num_of_Delayed_Payment, Changed_Credit_Limit
+    # 3) keep these as strings for regex‐cleaning
+    string_fields = [
+        "Annual_Income",
+        "Monthly_Inhand_Salary",
+        "Num_of_Loan",
+        "Num_of_Delayed_Payment",
+        "Changed_Credit_Limit",
+        "Outstanding_Debt",
+        "Credit_Utilization_Ratio",
+        "Total_EMI_per_month",
+        "Amount_invested_monthly",
+        "Monthly_Balance",
+        "Credit_History_Age",
+    ]
+    for c in string_fields:
+        df = df.withColumn(c, col(c).cast(StringType()))
+
+    # 4) strip underscores & cast to float
     for c in [
-        'Annual_Income',
-        'Monthly_Inhand_Salary',
-        'Num_of_Delayed_Payment',
-        'Changed_Credit_Limit'
+        "Annual_Income",
+        "Monthly_Inhand_Salary",
+        "Num_of_Loan",
+        "Num_of_Delayed_Payment",
+        "Changed_Credit_Limit",
+        "Outstanding_Debt",
+        "Total_EMI_per_month",
+        "Amount_invested_monthly",
+        "Monthly_Balance",
     ]:
         df = df.withColumn(
             c,
-            F.regexp_replace(col(c).cast(StringType()), '_', '')
+            F.regexp_replace(col(c), "_", "")
              .cast(FloatType())
         )
-    median_ccl = df.approxQuantile('Changed_Credit_Limit', [0.5], 0.0)[0]
+
+    # 4b) impute Changed_Credit_Limit blanks → median
+    median_ccl = df.approxQuantile("Changed_Credit_Limit", [0.5], 0.0)[0]
     df = df.withColumn(
-        'Changed_Credit_Limit',
-        when(col('Changed_Credit_Limit').isNull(), median_ccl)
-        .otherwise(col('Changed_Credit_Limit'))
-        .cast(FloatType())
+        "Changed_Credit_Limit",
+        when(col("Changed_Credit_Limit").isNull(), median_ccl)
+         .otherwise(col("Changed_Credit_Limit"))
     )
 
-    # 2) Clean Outstanding_Debt
-    df = df.withColumn(
-        'Outstanding_Debt',
-        F.regexp_replace(col('Outstanding_Debt').cast(StringType()), '_', '')
-         .cast(FloatType())
-    )
-
-    # 3) Clean Num_of_Loan: strip “_”, replace -100→7, blank→7, cast
-    df = df.withColumn(
-        'Num_of_Loan',
-        F.regexp_replace(col('Num_of_Loan').cast(StringType()), '_', '')
-    )
-    df = df.withColumn(
-        'Num_of_Loan',
-        when(col('Num_of_Loan') == '-100', '7')
-        .when(col('Num_of_Loan') == '',      '7')
-        .otherwise(col('Num_of_Loan'))
-        .cast(FloatType())
-    )
-
-    # 4) Define caps and apply
-    caps = {
-        'Num_Bank_Accounts':  10,
-        'Num_Credit_Card':    10,
-        'Interest_Rate':      34,
-        'Num_of_Loan':         9,
-    }
-    for c, cap in caps.items():
-        df = df.withColumn(c, when(col(c) > cap, cap).otherwise(col(c)))
-
-    # 5) Replace Monthly_Balance placeholder with mean
-    df = df.withColumn(
-        'Monthly_Balance',
-        when(col('Monthly_Balance') == '__-333333333333333333333333333__', None)
-        .otherwise(col('Monthly_Balance'))
-        .cast(FloatType())
-    )
-    mean_bal = df.select(F.mean('Monthly_Balance')).first()[0]
-    df = df.withColumn(
-        'Monthly_Balance',
-        when(col('Monthly_Balance').isNull(), mean_bal)
-        .otherwise(col('Monthly_Balance'))
-        .cast(FloatType())
-    )
-
-    # 6) Standardize Payment_Behaviour
+    # 5) standardize Payment_Behaviour & Credit_Mix
     valid_pb = [
         'High_spent_Large_value_payments',
         'High_spent_Medium_value_payments',
@@ -135,68 +101,56 @@ def process_silver_table_financials(snapshot_date_str, bronze_financials_directo
         'Low_spent_Small_value_payments'
     ]
     df = df.withColumn(
-        'Payment_Behaviour',
-        when(col('Payment_Behaviour').isin(valid_pb), col('Payment_Behaviour'))
-        .otherwise('Unknown')
+        "Payment_Behaviour",
+        when(col("Payment_Behaviour").isin(valid_pb),
+             col("Payment_Behaviour"))
+        .otherwise("Unknown")
     )
-
-    # 7) Standardize Credit_Mix
     valid_cm = ['Bad', 'Good', 'Standard']
     df = df.withColumn(
-        'Credit_Mix',
-        when(col('Credit_Mix').isin(valid_cm), col('Credit_Mix'))
-        .otherwise('Unknown')
+        "Credit_Mix",
+        when(col("Credit_Mix").isin(valid_cm), col("Credit_Mix"))
+        .otherwise("Unknown")
     )
 
-    # 8) Clean Amount_invested_monthly
-    df = df.withColumn(
-        'Amount_invested_monthly',
-        when(col('Amount_invested_monthly') == '__10000__', None)
-        .otherwise(col('Amount_invested_monthly'))
-        .cast(FloatType())
-    )
-    mean_inv = df.select(F.mean('Amount_invested_monthly')).first()[0]
-    df = df.withColumn(
-        'Amount_invested_monthly',
-        when(col('Amount_invested_monthly').isNull(), mean_inv)
-        .otherwise(col('Amount_invested_monthly'))
-        .cast(FloatType())
+    # 6) parse Credit_History_Age while still a string
+    df = (
+        df.withColumn(
+            "years",
+            F.regexp_extract(col("Credit_History_Age"), r"(\d+)\s+Years?", 1)
+             .cast(IntegerType())
+        )
+          .withColumn(
+            "months",
+            F.regexp_extract(col("Credit_History_Age"), r"(\d+)\s+Months?", 1)
+             .cast(IntegerType())
+        )
+          .withColumn(
+            "Credit_History_Age_num",
+            (col("years") + col("months")/F.lit(12)).cast(FloatType())
+        )
+          .drop("Credit_History_Age","years","months")
     )
 
-    # 9) Parse Credit_History_Age into numeric years
-    df = df.withColumn(
-        'years',
-        F.regexp_extract(col('Credit_History_Age'), r'(\d+)\s+Years?', 1)
-        .cast(IntegerType())
+    # 7) compute ratio features exactly like pandas
+    df = (
+        df.withColumn(
+            "debt_to_income_ratio",
+            col("Outstanding_Debt") / col("Annual_Income")
+        )
+          .withColumn(
+            "monthly_repayment_to_income",
+            col("Total_EMI_per_month") / col("Monthly_Inhand_Salary")
+        )
+          .withColumn(
+            "days_overdue_per_late_payment",
+            col("Delay_from_due_date") / col("Num_of_Delayed_Payment")
+        )
+          .withColumn(
+            "credit_inquiries_per_year",
+            col("Num_Credit_Inquiries") / col("Credit_History_Age_num")
+        )
     )
-    df = df.withColumn(
-        'months',
-        F.regexp_extract(col('Credit_History_Age'), r'(\d+)\s+Months?', 1)
-        .cast(IntegerType())
-    )
-    df = df.withColumn(
-        'Credit_History_Age_num',
-        (col('years') + col('months')/F.lit(12)).cast(FloatType())
-    ).drop('Credit_History_Age','years','months')
-
-    # 11) Additional ratio features (all FloatType)
-    df = df.withColumn(
-        "debt_to_income_ratio",
-        (col("Outstanding_Debt") / col("Annual_Income")).cast(FloatType())
-    )
-    df = df.withColumn(
-        "monthly_repayment_to_income",
-        (col("Total_EMI_per_month") / col("Monthly_Inhand_Salary")).cast(FloatType())
-    )
-    df = df.withColumn(
-        "days_overdue_per_late_payment",
-        (col("Delay_from_due_date") / col("Num_of_Delayed_Payment")).cast(FloatType())
-    )
-    df = df.withColumn(
-        "credit_inquiries_per_year",
-        (col("Num_Credit_Inquiries") / col("Credit_History_Age_num")).cast(FloatType())
-    )
- 
 
     # save silver table - IRL connect to database to write
     partition_name = "silver_feature_financials_" + snapshot_date_str.replace('-','_') + '.parquet' 
