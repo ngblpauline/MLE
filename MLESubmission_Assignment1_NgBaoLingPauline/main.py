@@ -90,13 +90,6 @@ if not os.path.exists(bronze_financials_directory):
 for date_str in dates_str_lst:
     utils.data_processing_bronze_table_feature.process_bronze_table_financials(date_str, bronze_financials_directory, spark)
 
-import importlib
-import utils.data_processing_silver_table as silver_mod
-importlib.reload(silver_mod)
-
-# see exactly what functions are exposed
-print([f for f in dir(silver_mod) if f.startswith("process")])
-
 # create silver datalake (clickstream)
 silver_clickstream_directory = "datamart/silver/feature/clickstream/"
 
