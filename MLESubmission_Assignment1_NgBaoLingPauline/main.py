@@ -13,10 +13,6 @@ import pyspark.sql.functions as F
 from pyspark.sql.functions import col
 from pyspark.sql.types import StringType, IntegerType, FloatType, DateType
 
-import utils.data_processing_bronze_table
-import utils.data_processing_silver_table
-import utils.data_processing_gold_table
-
 import utils.data_processing_bronze_table_feature
 import utils.data_processing_silver_table_feature
 import utils.data_processing_gold_table_feature
