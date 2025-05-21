@@ -1,57 +1,60 @@
 import os
-import glob
-import pandas as pd
-import matplotlib.pyplot as plt
-import numpy as np
-import random
-from datetime import datetime, timedelta
-from dateutil.relativedelta import relativedelta
-import pprint
-import pyspark
-import pyspark.sql.functions as F
-import argparse
+from datetime import datetime
+from pyspark.sql import SparkSession
 
-from pyspark.sql.functions import col
-from pyspark.sql.types import StringType, IntegerType, FloatType, DateType
-
-
-def process_features_gold_table(snapshot_date_str, silver_clickstream_directory, silver_attributes_directory, silver_financials_directory, gold_feature_store_directory, spark):
-    
-    # prepare arguments
-    snapshot_date = datetime.strptime(snapshot_date_str, "%Y-%m-%d")
-
-    # connect to silver clickstream 
+def process_features_gold_table(
+    snapshot_date_str: str,
+    silver_clickstream_directory: str,
+    silver_attributes_directory: str,
+    silver_financials_directory: str,
+    gold_feature_store_directory: str
+):
+    spark = SparkSession.builder.getOrCreate()
     part = snapshot_date_str.replace('-', '_')
-    partition_name = f"silver_feature_clickstream_{part}.parquet"
-    filepath = silver_clickstream_directory + partition_name
-    df_click = spark.read.parquet(filepath)
-    print(f"loaded clickstream from: {filepath}, rows: {df_click.count():,}")
 
-    # connect to silver attributes 
-    partition_name = f"silver_features_attributes_{part}.parquet"
-    filepath = silver_attributes_directory + partition_name
-    df_attr = spark.read.parquet(filepath)
-    print(f"loaded attributes   from: {filepath}, rows: {df_attr.count():,}")
+    # 1) read all clickstream events (24 per customer)
+    click_pattern = os.path.join(
+        silver_clickstream_directory,
+        "silver_feature_clickstream_*.parquet"
+    )
+    df_click = spark.read.parquet(click_pattern)
 
-    # connect to silver financials 
-    partition_name = f"silver_feature_financials_{part}.parquet"
-    filepath = silver_financials_directory + partition_name
-    df_fin = spark.read.parquet(filepath)
-    print(f"loaded financials   from: {filepath}, rows: {df_fin.count():,}")
+    # 2) read the attributes slice for the given date
+    attr_path = os.path.join(
+        silver_attributes_directory,
+        f"silver_features_attributes_{part}.parquet"
+    )
+    df_attr = spark.read.parquet(attr_path)
 
-    # now full‐outer‐join
-    df = (
-        df_click
-          .join(df_fin, on=["Customer_ID","snapshot_date"], how="outer")
-          .join(df_attr, on=["Customer_ID","snapshot_date"], how="outer")
+    # 3) read the financials slice for the given date
+    fin_path = os.path.join(
+        silver_financials_directory,
+        f"silver_feature_financials_{part}.parquet"
+    )
+    df_fin = spark.read.parquet(fin_path)
+
+    # 4) one-to-one join financials and attributes on (Customer_ID, snapshot_date)
+    fin_attr = df_fin.join(
+        df_attr,
+        on=["Customer_ID", "snapshot_date"],
+        how="left"
     )
 
-    # save gold table - IRL connect to database to write
-    partition_name = "gold_feature_store_" + snapshot_date_str.replace('-','_') + '.parquet'
-    filepath = gold_feature_store_directory + partition_name
-    df.write.mode("overwrite").parquet(filepath)
-    # df.toPandas().to_parquet(filepath,
-    #           compression='gzip')
-    print('saved to:', filepath)
-    
-    return df
+    # 5) drop snapshot_date so each Customer_ID has exactly one fin/attr row
+    fin_attr = fin_attr.drop("snapshot_date")
+
+    # 6) left‐join clickstream to fin+attr on Customer_ID
+    df_full = df_click.join(
+        fin_attr,
+        on="Customer_ID",
+        how="left"
+    )
+
+    # 7) write out the gold feature store
+    out_path = os.path.join(
+        gold_feature_store_directory,
+        f"gold_feature_store_{part}.parquet"
+    )
+    df_full.write.mode("overwrite").parquet(out_path)
+
+    return df_full
