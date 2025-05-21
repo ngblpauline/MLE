@@ -114,6 +114,26 @@ def process_silver_table_financials(snapshot_date_str, bronze_financials_directo
         .otherwise("Unknown")
     )
 
+    df = df.withColumn(
+    "days_overdue_per_late_payment",
+    (
+      # clean & cast the numerator, default to 0.0 if non-numeric or null
+      coalesce(
+        regexp_replace(col("Delay_from_due_date"), "[^0-9\\.]", "")
+          .cast("double"),
+        lit(0.0)
+      )
+      /
+      # clean & cast the denominator, but if it’s <= 0 (or non-numeric → null), use 1.0
+      when(
+        regexp_replace(col("Num_of_Delayed_Payment"), "[^0-9\\.]", "")
+          .cast("double") > 0,
+        regexp_replace(col("Num_of_Delayed_Payment"), "[^0-9\\.]", "")
+          .cast("double")
+      )
+      .otherwise(lit(1.0))
+    ))
+
     # 6) parse Credit_History_Age while still a string
     df = (
         df.withColumn(
@@ -193,7 +213,7 @@ def process_silver_table_financials(snapshot_date_str, bronze_financials_directo
     ).withColumn(
         "Unknown_count",
         when(col("_known_sum") == 0, lit(1)).otherwise(lit(0))
-    ).drop("_loan_array", "_known_sum")
+    ).drop("_loan_array", "_known_sum", "Type_of_Loan")
 
     # save silver table - IRL connect to database to write
     partition_name = "silver_feature_financials_" + snapshot_date_str.replace('-','_') + '.parquet' 
