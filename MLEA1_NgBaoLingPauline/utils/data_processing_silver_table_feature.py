@@ -19,6 +19,16 @@ from pyspark.sql.functions import when
 from pyspark.sql.functions import regexp_replace, when, abs, regexp_extract
 from pyspark.sql.types import DoubleType
 
+import pyspark
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import (
+    col,
+    regexp_replace,
+    when,
+    coalesce,
+    lit
+)
+
 def process_silver_table_financials(snapshot_date_str, bronze_financials_directory, silver_financials_directory, spark):
     # prepare arguments
     snapshot_date = datetime.strptime(snapshot_date_str, "%Y-%m-%d")
@@ -115,24 +125,20 @@ def process_silver_table_financials(snapshot_date_str, bronze_financials_directo
     )
 
     df = df.withColumn(
-    "days_overdue_per_late_payment",
-    (
-      # clean & cast the numerator, default to 0.0 if non-numeric or null
-      coalesce(
-        regexp_replace(col("Delay_from_due_date"), "[^0-9\\.]", "")
-          .cast("double"),
-        lit(0.0)
+      "days_overdue_per_late_payment",
+      (
+        F.coalesce(
+          F.regexp_replace(col("Delay_from_due_date"), "[^0-9\\.]", "").cast("double"),
+          F.lit(0.0)
+        )
+        /
+        F.when(
+          F.regexp_replace(col("Num_of_Delayed_Payment"), "[^0-9\\.]", "").cast("double") > 0,
+          F.regexp_replace(col("Num_of_Delayed_Payment"), "[^0-9\\.]", "").cast("double")
+        )
+        .otherwise(F.lit(1.0))
       )
-      /
-      # clean & cast the denominator, but if it’s <= 0 (or non-numeric → null), use 1.0
-      when(
-        regexp_replace(col("Num_of_Delayed_Payment"), "[^0-9\\.]", "")
-          .cast("double") > 0,
-        regexp_replace(col("Num_of_Delayed_Payment"), "[^0-9\\.]", "")
-          .cast("double")
-      )
-      .otherwise(lit(1.0))
-    ))
+    )
 
     # 6) parse Credit_History_Age while still a string
     df = (
@@ -163,10 +169,7 @@ def process_silver_table_financials(snapshot_date_str, bronze_financials_directo
             "monthly_repayment_to_income",
             col("Total_EMI_per_month") / col("Monthly_Inhand_Salary")
         )
-          .withColumn(
-            "days_overdue_per_late_payment",
-            col("Delay_from_due_date") / col("Num_of_Delayed_Payment")
-        )
+        
           .withColumn(
             "credit_inquiries_per_year",
             col("Num_Credit_Inquiries") / col("Credit_History_Age_num")
