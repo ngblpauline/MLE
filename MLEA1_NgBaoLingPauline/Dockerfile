@@ -13,7 +13,6 @@ RUN apt-get update && \
     # Create expected JAVA_HOME directory and symlink the java binary there (only if missing)
     mkdir -p /usr/lib/jvm/java-17-openjdk-amd64/bin && \
     [ -f /usr/lib/jvm/java-17-openjdk-amd64/bin/java ] || ln -s "$(which java)" /usr/lib/jvm/java-17-openjdk-amd64/bin/java
-    
 
 # Set JAVA_HOME to the directory expected by Spark
 ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
