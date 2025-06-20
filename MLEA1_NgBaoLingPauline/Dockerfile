@@ -1,42 +1,34 @@
-# last updated Mar 25 2025, 11:00am
-FROM python:3.12-slim
+FROM apache/airflow:2.6.2-python3.11
 
-# Set non-interactive mode for apt-get
+USER root
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install Java (OpenJDK 17 headless), procps (for 'ps') and bash
+# system-level deps
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends openjdk-17-jdk-headless procps bash && \
+    apt-get install -y --no-install-recommends \
+      openjdk-17-jdk-headless procps bash libgeos-c1v5 libgeos-dev && \
     rm -rf /var/lib/apt/lists/* && \
-    # Ensure Spark’s scripts run with bash instead of dash
     ln -sf /bin/bash /bin/sh && \
-    # Create expected JAVA_HOME directory and symlink the java binary there (only if missing)
     mkdir -p /usr/lib/jvm/java-17-openjdk-amd64/bin && \
     [ -f /usr/lib/jvm/java-17-openjdk-amd64/bin/java ] || ln -s "$(which java)" /usr/lib/jvm/java-17-openjdk-amd64/bin/java
 
-# Set JAVA_HOME to the directory expected by Spark
 ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 ENV PATH=$PATH:$JAVA_HOME/bin
 
-# Set the working directory
+# drop back to airflow user for Python installs
+RUN chown -R airflow: /opt/airflow
+USER airflow
+
 WORKDIR /app
 
-# Copy the requirements file into the container
 COPY requirements.txt ./
 
-# Install Python dependencies (ensure that pyspark is in your requirements.txt,
-# or you can install it explicitly by uncommenting the next line)
+# 1) Install NumPy 1.x + Pandas 2.x *as airflow* so the wheels match
+RUN pip install --no-cache-dir \
+      numpy==1.23.5 \
+      "pandas>=2.0.0,<2.1.0"
+
+# 2) Then install the rest of your requirements
 RUN pip install --no-cache-dir -r requirements.txt
-# RUN pip install pyspark
 
-# Expose the default JupyterLab port
-EXPOSE 8888
-
-# Create a volume mount point for notebooks
-VOLUME /app
-
-# Enable JupyterLab via environment variable
-ENV JUPYTER_ENABLE_LAB=yes
-
-# Set up the command to run JupyterLab
-CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root", "--notebook-dir=/app"]
+VOLUME ["/app"]
