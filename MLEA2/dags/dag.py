@@ -48,7 +48,7 @@ with DAG(
     dep_check_source_feature_data = DummyOperator(task_id="dep_check_source_feature_data")
 
     feature_store = BashOperator(
-        task_id='run_feature_store',
+        task_id='feature_store',
         bash_command=(
             'cd /opt/airflow/scripts && '
             'python3 main.py '
@@ -59,7 +59,7 @@ with DAG(
     feature_store_completed = DummyOperator(task_id="feature_store_completed")
     
     # Define task dependencies to run scripts sequentially
-    dep_check_source_feature_data >> feature_store_completed
+    dep_check_source_feature_data >> feature_store >> feature_store_completed
 
     # --- model inference ---
     model_inference_start = DummyOperator(task_id="model_inference_start")
